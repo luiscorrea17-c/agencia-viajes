@@ -1,3 +1,10 @@
+# Variables de entorno y secretos locales
+.env
+.env.*
+!.env.example
+*.local
+.dev.vars
+
 # Logs
 logs
 *.log
@@ -7,24 +14,39 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencias y salidas de compilación (raíz y subcarpetas)
 node_modules
+node_modules/
 dist
+dist/
 dist-ssr
+build/
+coverage/
 .output
 .vinxi
 .tanstack/**
 .nitro
-*.local
-
-# Wrangler / Cloudflare
 .wrangler/
-.dev.vars
 
-# Editor directories and files
+# Bases de datos locales y caché Python (backend)
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+.venv/
+venv/
+
+# Archivos locales o cargados; conserva el marcador de la carpeta
+files/*
+!files/.gitkeep
+
+# Archivos del sistema y editores
+.DS_Store
+Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
