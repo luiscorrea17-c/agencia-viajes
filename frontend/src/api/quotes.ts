@@ -1,4 +1,5 @@
 // Servicio mock del Cotizador IA. Reemplazar por FastAPI manteniendo firmas y reglas.
+import { apiRequest, isBackendEnabled } from "./client";
 import { canAccess } from "./auth";
 import { getRequest, syncRequestLifecycle, type RequestActor } from "./requests";
 
@@ -144,6 +145,7 @@ export const canApproveDiscount = (a: RequestActor, q: Quote) =>
 export const canRespondQuote = (a: RequestActor, q: Quote) => a.role === "Cliente" && q.status === "Enviada" && q.clientEmail === a.email;
 
 export async function listQuotes(actor: RequestActor): Promise<Quote[]> {
+  if (isBackendEnabled()) return apiRequest<Quote[]>("/quotes");
   await delay(); authorize(actor);
   quotes = quotes.map(expire);
   return clone(quotes.filter((q) => visible(actor, q)));
@@ -151,6 +153,11 @@ export async function listQuotes(actor: RequestActor): Promise<Quote[]> {
 
 /** Crea un borrador con propuesta generada por IA (distribución de presupuesto, servicios y descripción). */
 export async function createQuoteFromRequest(actor: RequestActor, requestId: string): Promise<Quote> {
+  if (isBackendEnabled()) {
+    return apiRequest<Quote>(`/quotes/from-request/${encodeURIComponent(requestId)}`, {
+      method: "POST",
+    });
+  }
   await delay(); authorize(actor);
   if (actor.role !== "Asesor") throw new Error("Solo un Asesor puede crear cotizaciones.");
   quotes = quotes.map(expire);
@@ -176,6 +183,12 @@ export async function createQuoteFromRequest(actor: RequestActor, requestId: str
 }
 
 export async function saveQuoteDraft(actor: RequestActor, id: string, input: QuoteDraftInput): Promise<Quote> {
+  if (isBackendEnabled()) {
+    return apiRequest<Quote>(`/quotes/${encodeURIComponent(id)}/draft`, {
+      method: "PUT",
+      body: input,
+    });
+  }
   await delay(); authorize(actor);
   const q = find(actor, id);
   if (!canEditQuote(actor, q)) throw new Error("Solo el Asesor puede editar cotizaciones en borrador.");
@@ -198,6 +211,11 @@ export async function saveQuoteDraft(actor: RequestActor, id: string, input: Quo
 }
 
 export async function approveDiscount(actor: RequestActor, id: string): Promise<Quote> {
+  if (isBackendEnabled()) {
+    return apiRequest<Quote>(`/quotes/${encodeURIComponent(id)}/approve-discount`, {
+      method: "POST",
+    });
+  }
   await delay(); authorize(actor);
   const q = find(actor, id);
   if (!canApproveDiscount(actor, q)) throw new Error("Solo el Administrador puede aprobar este descuento.");
@@ -205,6 +223,9 @@ export async function approveDiscount(actor: RequestActor, id: string): Promise<
 }
 
 export async function sendQuote(actor: RequestActor, id: string): Promise<Quote> {
+  if (isBackendEnabled()) {
+    return apiRequest<Quote>(`/quotes/${encodeURIComponent(id)}/send`, { method: "POST" });
+  }
   await delay(); authorize(actor);
   const q = find(actor, id);
   if (!canEditQuote(actor, q)) throw new Error("Solo el Asesor puede enviar cotizaciones en borrador.");
@@ -214,6 +235,12 @@ export async function sendQuote(actor: RequestActor, id: string): Promise<Quote>
 }
 
 export async function respondQuote(actor: RequestActor, id: string, decision: "Aprobada" | "Rechazada"): Promise<Quote> {
+  if (isBackendEnabled()) {
+    return apiRequest<Quote>(`/quotes/${encodeURIComponent(id)}/respond`, {
+      method: "POST",
+      body: { decision },
+    });
+  }
   await delay(); authorize(actor);
   const q = find(actor, id);
   if (!canRespondQuote(actor, q)) throw new Error("Esta cotización ya no admite respuesta.");

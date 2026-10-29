@@ -1,4 +1,5 @@
 import { canAccess, type User } from "./auth";
+import { apiRequest, isBackendEnabled } from "./client";
 import { getClientDirectorySnapshot, syncClientLinkedRequest } from "./clients";
 import cartagena from "@/assets/cartagena.jpg";
 import sanAndres from "@/assets/san-andres.jpg";
@@ -50,14 +51,17 @@ function authorize(actor: RequestActor) {
 }
 const owns = (actor: RequestActor, clientId: string) => actor.role !== "Cliente" || actor.id === clientId;
 export async function listClients(actor: RequestActor): Promise<Client[]> {
+  if (isBackendEnabled()) return apiRequest<Client[]>("/requests/clients");
   await delay(); authorize(actor);
   return clone(getClientDirectorySnapshot().filter((client) => owns(actor, client.id)));
 }
 export async function listRequests(actor: RequestActor): Promise<TravelRequest[]> {
+  if (isBackendEnabled()) return apiRequest<TravelRequest[]>("/requests");
   await delay(); authorize(actor);
   return clone(requests.filter((request) => owns(actor, request.clientId)));
 }
 export async function getRequest(actor: RequestActor, id: string): Promise<TravelRequest> {
+  if (isBackendEnabled()) return apiRequest<TravelRequest>(`/requests/${encodeURIComponent(id)}`);
   await delay(); authorize(actor);
   const request = requests.find((item) => item.id === id && owns(actor, item.clientId));
   if (!request) throw new Error("La solicitud no está disponible.");
@@ -94,6 +98,9 @@ function validate(input: RequestInput, actor: RequestActor): Client {
   return client;
 }
 export async function createRequest(actor: RequestActor, input: RequestInput): Promise<TravelRequest> {
+  if (isBackendEnabled()) {
+    return apiRequest<TravelRequest>("/requests", { method: "POST", body: input });
+  }
   await delay(); authorize(actor);
   const client = validate(input, actor);
   const number = nextId++;
@@ -116,6 +123,12 @@ export async function createRequest(actor: RequestActor, input: RequestInput): P
   return clone(request);
 }
 export async function updateRequest(actor: RequestActor, id: string, input: RequestInput): Promise<TravelRequest> {
+  if (isBackendEnabled()) {
+    return apiRequest<TravelRequest>(`/requests/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: input,
+    });
+  }
   await delay(); authorize(actor);
   const previous = requests.find((item) => item.id === id && owns(actor, item.clientId));
   if (!previous) throw new Error("La solicitud no está disponible.");

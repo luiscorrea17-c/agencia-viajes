@@ -1,4 +1,5 @@
 import { canAccess, type User } from "./auth";
+import { apiRequest, isBackendEnabled } from "./client";
 
 export type ClientType = "Persona" | "Empresa";
 export type ClientSegment = "Estándar" | "Corporativo" | "VIP";
@@ -82,10 +83,12 @@ export function syncClientLinkedRequest(
   });
 }
 export async function listClientRecords(actor: ClientActor): Promise<ClientRecord[]> {
+  if (isBackendEnabled()) return apiRequest<ClientRecord[]>("/clients");
   await delay(); authorize(actor);
   return clone(records.filter((record) => owns(actor, record.id)));
 }
 export async function getClientRecord(actor: ClientActor, id: string): Promise<ClientRecord> {
+  if (isBackendEnabled()) return apiRequest<ClientRecord>(`/clients/${encodeURIComponent(id)}`);
   await delay(); authorize(actor);
   const record = records.find((item) => item.id === id && owns(actor, id));
   if (!record) throw new Error("El expediente no está disponible.");
@@ -103,6 +106,9 @@ function validate(input: ClientInput) {
   }
 }
 export async function createClientRecord(actor: ClientActor, input: ClientInput): Promise<ClientRecord> {
+  if (isBackendEnabled()) {
+    return apiRequest<ClientRecord>("/clients", { method: "POST", body: input });
+  }
   await delay(); authorize(actor);
   if (!canCreateClient(actor)) throw new Error("Solo Administrador o Asesor pueden registrar nuevos clientes.");
   validate(input);
@@ -128,6 +134,13 @@ export async function createClientRecord(actor: ClientActor, input: ClientInput)
 }
 
 export async function updateClientRecord(actor: ClientActor, id: string, input: ClientInput, reason?: string): Promise<ClientRecord> {
+  if (isBackendEnabled()) {
+    const query = reason?.trim() ? `?reason=${encodeURIComponent(reason.trim())}` : "";
+    return apiRequest<ClientRecord>(`/clients/${encodeURIComponent(id)}${query}`, {
+      method: "PUT",
+      body: input,
+    });
+  }
   await delay(); authorize(actor);
   const previous = records.find((record) => record.id === id && owns(actor, id));
   if (!previous) throw new Error("El expediente no está disponible.");

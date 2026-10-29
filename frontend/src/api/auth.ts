@@ -1,4 +1,5 @@
-// Servicio mock de autenticación. Reemplazar por llamadas a FastAPI manteniendo firmas.
+// Conserva el mock local y usa FastAPI cuando VITE_API_URL está configurado.
+import { apiRequest, isBackendEnabled } from "./client";
 export type Role = "Administrador" | "Asesor" | "Contabilidad" | "Cliente";
 
 export interface User {
@@ -66,6 +67,15 @@ const delay = (ms = 700) => new Promise((r) => setTimeout(r, ms));
 export class AuthError extends Error {}
 
 export async function login(email: string, password: string): Promise<Session> {
+  if (isBackendEnabled()) {
+    const session = await apiRequest<Session>("/auth/login", {
+      method: "POST",
+      body: { email, password },
+      auth: false,
+    });
+    saveSession(session);
+    return session;
+  }
   await delay();
   const u = USERS.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
   if (!u || u.password !== password) throw new AuthError("Correo o contraseña incorrectos.");
@@ -77,6 +87,11 @@ export async function login(email: string, password: string): Promise<Session> {
 }
 
 export async function logout(): Promise<void> {
+  if (isBackendEnabled()) {
+    await apiRequest<{ ok: boolean }>("/auth/logout", { method: "POST" });
+    localStorage.removeItem(STORAGE_KEY);
+    return;
+  }
   await delay(200);
   localStorage.removeItem(STORAGE_KEY);
 }
@@ -108,9 +123,16 @@ function adminOnly(actor: PublicUser) {
 }
 const publicUser = ({ password: _password, ...user }: User): PublicUser => user;
 export async function listUsers(actor: PublicUser): Promise<PublicUser[]> {
+  if (isBackendEnabled()) return apiRequest<PublicUser[]>("/users");
   await delay(500); adminOnly(actor); return structuredClone(USERS.map(publicUser));
 }
 export async function saveUser(actor: PublicUser, id: string | null, input: UserInput): Promise<PublicUser> {
+  if (isBackendEnabled()) {
+    return apiRequest<PublicUser>(id ? `/users/${encodeURIComponent(id)}` : "/users", {
+      method: id ? "PUT" : "POST",
+      body: input,
+    });
+  }
   await delay(500); adminOnly(actor);
   if (!input.name.trim() || !input.branch.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim()) || !ROLES.includes(input.role)) throw new AuthError("Revisa nombre, correo, sede y rol.");
   if (USERS.some((u) => u.id !== id && u.email.toLowerCase() === input.email.trim().toLowerCase())) throw new AuthError("Este correo ya está registrado.");
@@ -123,6 +145,12 @@ export async function saveUser(actor: PublicUser, id: string | null, input: User
   return publicUser(user);
 }
 export async function setUserActive(actor: PublicUser, id: string, active: boolean): Promise<PublicUser> {
+  if (isBackendEnabled()) {
+    return apiRequest<PublicUser>(`/users/${encodeURIComponent(id)}/active`, {
+      method: "PATCH",
+      body: { active },
+    });
+  }
   await delay(500); adminOnly(actor);
   if (id === actor.id && !active) throw new AuthError("No puedes desactivar tu propia cuenta.");
   const user = USERS.find((u) => u.id === id);

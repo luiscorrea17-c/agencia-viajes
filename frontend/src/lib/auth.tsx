@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import * as api from "@/api/auth";
+import { isBackendEnabled } from "@/api/client";
 import type { Role, Session } from "@/api/auth";
 
 interface AuthCtx {
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
     },
     switchRole: (role) => {
-      if (!session) return;
+      if (!session || isBackendEnabled()) return;
       const s = { ...session, user: { ...session.user, role } };
       api.saveSession(s);
       setSession(s);

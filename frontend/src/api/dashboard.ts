@@ -2,6 +2,7 @@ import { canAccess, listUsers } from "./auth";
 import { listRequests, type RequestActor } from "./requests";
 import { listQuotes } from "./quotes";
 import { listBookings, listPayments } from "./bookings";
+import { apiRequest, isBackendEnabled } from "./client";
 
 export interface RadarCity {
   code: string;
@@ -131,6 +132,22 @@ export const DEFAULT_RADAR_PULSE: RadarPulse = {
 };
 
 export async function getDashboard(actor: RequestActor) {
+  if (isBackendEnabled()) {
+    const data = await apiRequest<{
+      requests: Awaited<ReturnType<typeof listRequests>>;
+      quotes: Awaited<ReturnType<typeof listQuotes>>;
+      bookings: Awaited<ReturnType<typeof listBookings>>;
+      payments: Awaited<ReturnType<typeof listPayments>>;
+      users: Awaited<ReturnType<typeof listUsers>>;
+    }>("/dashboard");
+    return {
+      ...data,
+      radar: {
+        cities: RADAR_CITIES,
+        pulse: DEFAULT_RADAR_PULSE,
+      },
+    };
+  }
   const [requests, quotes, bookings, payments, users] = await Promise.all([
     canAccess(actor.role, "/solicitudes") ? listRequests(actor) : [],
     listQuotes(actor),

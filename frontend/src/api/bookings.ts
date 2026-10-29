@@ -1,4 +1,5 @@
 import { canAccess } from "./auth";
+import { apiRequest, isBackendEnabled } from "./client";
 import { getClientDossierSnapshot, type DocType } from "./clients";
 import { listQuotes, type Quote, type QuoteServiceItem } from "./quotes";
 import { getRequest, syncRequestLifecycle, type RequestActor, type AuditEntry } from "./requests";
@@ -126,9 +127,16 @@ const visible = (a: RequestActor, x: { clientId: string }) => a.role !== "Client
 export const canManageBooking = (a: RequestActor) => a.active && (a.role === "Administrador" || a.role === "Asesor");
 export const canReconcile = (a: RequestActor) => a.active && (a.role === "Administrador" || a.role === "Contabilidad");
 function audit(a: RequestActor, history: AuditEntry[], action: string) { return [...history, { id: crypto.randomUUID(), action, user: a.name, timestamp: new Date().toISOString() }]; }
-export async function listBookings(a: RequestActor): Promise<Booking[]> { await delay(); authorize(a, "/reservas"); return copy(bookings.filter((b) => visible(a, b))); }
-export async function listBookingOptions(a: RequestActor): Promise<Booking[]> { await delay(); authorize(a, "/pagos"); return copy(bookings.filter((b) => visible(a, b) && b.status !== "cancelada")); }
+export async function listBookings(a: RequestActor): Promise<Booking[]> {
+  if (isBackendEnabled()) return apiRequest<Booking[]>("/bookings");
+  await delay(); authorize(a, "/reservas"); return copy(bookings.filter((b) => visible(a, b)));
+}
+export async function listBookingOptions(a: RequestActor): Promise<Booking[]> {
+  if (isBackendEnabled()) return apiRequest<Booking[]>("/bookings/options");
+  await delay(); authorize(a, "/pagos"); return copy(bookings.filter((b) => visible(a, b) && b.status !== "cancelada"));
+}
 export async function bookingSources(a: RequestActor): Promise<BookingSource[]> {
+  if (isBackendEnabled()) return apiRequest<BookingSource[]>("/bookings/sources");
   authorize(a, "/reservas"); if (!canManageBooking(a)) return [];
   const approved = (await listQuotes(a)).filter((q) => q.status === "Aprobada" && !bookings.some((b) => b.quoteId === q.id));
   const sources: BookingSource[] = [];
@@ -147,6 +155,12 @@ export async function bookingSources(a: RequestActor): Promise<BookingSource[]> 
   return sources;
 }
 export async function createBooking(a: RequestActor, quoteId: string, options?: CreateBookingOptions): Promise<Booking> {
+  if (isBackendEnabled()) {
+    return apiRequest<Booking>("/bookings", {
+      method: "POST",
+      body: { quoteId, options },
+    });
+  }
   await delay(); authorize(a, "/reservas"); if (!canManageBooking(a)) throw new Error("Solo el equipo puede crear reservas.");
   const q = (await listQuotes(a)).find((q) => q.id === quoteId && q.status === "Aprobada");
   if (!q) throw new Error("Selecciona una cotización aprobada.");
@@ -171,6 +185,12 @@ export async function createBooking(a: RequestActor, quoteId: string, options?: 
   bookings = [b, ...bookings]; return copy(b);
 }
 export async function changeBooking(a: RequestActor, id: string, status: BookingStatus, notes: string): Promise<Booking> {
+  if (isBackendEnabled()) {
+    return apiRequest<Booking>(`/bookings/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: { status, notes },
+    });
+  }
   await delay(); authorize(a, "/reservas"); if (!canManageBooking(a)) throw new Error("Solo el equipo puede modificar reservas.");
   const b = bookings.find((b) => b.id === id); if (!b || b.status === "cancelada") throw new Error("Esta reserva no admite cambios.");
   const allowed: Record<BookingStatus, BookingStatus[]> = { pendiente_pago: ["cancelada"], confirmada: ["en_modificacion", "cancelada"], en_modificacion: ["confirmada", "cancelada"], cancelada: [] };
@@ -184,8 +204,14 @@ export async function changeBooking(a: RequestActor, id: string, status: Booking
   }
   return copy(updated);
 }
-export async function listPayments(a: RequestActor): Promise<Payment[]> { await delay(); authorize(a, "/pagos"); return copy(payments.filter((p) => visible(a, p))); }
+export async function listPayments(a: RequestActor): Promise<Payment[]> {
+  if (isBackendEnabled()) return apiRequest<Payment[]>("/payments");
+  await delay(); authorize(a, "/pagos"); return copy(payments.filter((p) => visible(a, p)));
+}
 export async function registerPayment(a: RequestActor, input: PaymentInput): Promise<Payment> {
+  if (isBackendEnabled()) {
+    return apiRequest<Payment>("/payments", { method: "POST", body: input });
+  }
   await delay(); authorize(a, "/pagos"); const b = bookings.find((b) => b.id === input.bookingId && visible(a, b) && b.status !== "cancelada");
   if (!b) throw new Error("Selecciona una reserva disponible.");
   const committed = payments.filter((p) => p.bookingId === b.id && (p.status === "validado" || p.status === "por_conciliar")).reduce((s, p) => s + p.amountCOP, 0);
@@ -203,6 +229,12 @@ export async function registerPayment(a: RequestActor, input: PaymentInput): Pro
   payments = [p, ...payments]; return copy(p);
 }
 export async function reconcilePayment(a: RequestActor, id: string, status: PaymentStatus, reason: string): Promise<Payment> {
+  if (isBackendEnabled()) {
+    return apiRequest<Payment>(`/payments/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: { status, reason },
+    });
+  }
   await delay(); authorize(a, "/pagos"); if (!canReconcile(a)) throw new Error("Solo Administrador y Contabilidad concilian pagos.");
   const p = payments.find((p) => p.id === id); if (!p) throw new Error("El pago no está disponible.");
   if (!(p.status === "por_conciliar" && (status === "validado" || status === "rechazado") || p.status === "validado" && status === "devuelto")) throw new Error("Cambio de estado no permitido.");
