@@ -1,0 +1,26 @@
+# Variables de entorno y secretos locales
+.env
+.env.*
+!.env.example
+
+# Dependencias y salidas de compilación
+node_modules/
+dist/
+build/
+coverage/
+
+# Archivos del sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos locales o cargados; conserva el marcador de la carpeta
+files/*
+!files/.gitkeep
