@@ -1,29 +1,26 @@
-# Welcome to your Lovable project
+# Agencia de Viajes — TravelRequests (Módulo 4)
 
-This project was built with [Lovable](https://lovable.dev).
+Aplicación transaccional para la **gestión de solicitudes, cotizaciones asistidas por IA, reservas, viajeros y pagos**.
 
-## Build with Lovable
+## Estructura del repositorio
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+- `frontend/` — Aplicación web en React 19, TypeScript, TanStack Start/Router/Query y Tailwind CSS v4.
+- `backend/` — Servicios API (preparado para FastAPI + Pydantic consumiendo los contratos de `frontend/src/api`).
+- `database/` — Esquemas, migraciones y semillas de base de datos.
+- `files/` — Almacenamiento local de soportes y comprobantes.
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+## Ejecución local del frontend
 
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+```bash
+cd frontend
+npm install
 npm run dev
 ```
 
-## Built with
+Pruebas y verificación de tipos:
 
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
+```bash
+cd frontend
+npx tsc --noEmit
+npm test
+```

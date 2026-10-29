@@ -14,25 +14,25 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependencias y salidas de compilación (raíz y subcarpetas)
-node_modules
+# Dependencias y salidas de compilación (raíz y subcarpetas como frontend/)
 node_modules/
-dist
 dist/
-dist-ssr
+dist-ssr/
 build/
 coverage/
-.output
-.vinxi
-.tanstack/**
-.nitro
+.output/
+.vinxi/
+.tanstack/
+**/.tanstack/**
+.nitro/
 .wrangler/
 
-# Bases de datos locales y caché Python (backend)
+# Bases de datos locales y entorno Python (backend/)
 *.db
 *.sqlite
 *.sqlite3
 __pycache__/
+*.py[cod]
 .venv/
 venv/
 
@@ -45,7 +45,6 @@ files/*
 Thumbs.db
 .vscode/*
 !.vscode/extensions.json
-.idea
 .idea/
 *.suo
 *.ntvs*
