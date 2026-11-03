@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { CalendarClock, Check, X } from "lucide-react";
-import { canRespondQuote, respondQuote, type Quote, type RequestActor } from "@/api";
+import { Link } from "@tanstack/react-router";
+import { CalendarClock, Check, CreditCard, ExternalLink, X } from "lucide-react";
+import {
+  canRespondQuote,
+  ensureApprovedQuoteBooking,
+  respondQuote,
+  type Quote,
+  type RequestActor,
+} from "@/api";
 import { useAuth } from "@/lib/auth";
 import { Notice } from "./OperationUi";
 import { Button, ConfirmDialog, EmptyState, KpiCard, PageHeader, StatusChip } from "./ui";
@@ -18,17 +25,44 @@ function ClientQuotes({ actor }: { actor: RequestActor }) {
   const qc = useQueryClient();
   const { data: quotes } = useSuspenseQuery(quoteQuery(actor));
   const [pending, setPending] = useState<{ quote: Quote; decision: "Aprobada" | "Rechazada" } | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string; bookingCreated?: boolean } | null>(null);
   const respond = useMutation({
     mutationFn: (p: { quote: Quote; decision: "Aprobada" | "Rechazada" }) => respondQuote(actor, p.quote.id, p.decision),
     onSuccess: (q) => {
       qc.setQueryData(quoteQuery(actor).queryKey, (old: Quote[] | undefined) => (old ?? []).map((x) => x.id === q.id ? q : x));
       void qc.invalidateQueries({ queryKey: ["bookings"] });
+      void qc.invalidateQueries({ queryKey: ["payments"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
-      setMsg({ ok: true, text: q.status === "Aprobada" ? `Aprobaste ${q.code}. Tu asesor continuará con la reserva.` : `Rechazaste ${q.code}.` });
+      setMsg({
+        ok: true,
+        text: q.status === "Aprobada"
+          ? `Aprobaste ${q.code}. Se creó la reserva ${q.bookingCode ?? ""}.`
+          : `Rechazaste ${q.code}.`,
+        bookingCreated: q.status === "Aprobada" && Boolean(q.bookingCode),
+      });
     },
     onError: (e) => setMsg({ ok: false, text: e instanceof Error ? e.message : "No pudimos registrar tu respuesta." }),
     onSettled: () => setPending(null),
+  });
+  const ensureBooking = useMutation({
+    mutationFn: (quote: Quote) => ensureApprovedQuoteBooking(actor, quote.id),
+    onSuccess: ({ bookingCode }, quote) => {
+      qc.setQueryData(quoteQuery(actor).queryKey, (old: Quote[] | undefined) =>
+        (old ?? []).map((item) => item.id === quote.id ? { ...item, bookingCode } : item),
+      );
+      void qc.invalidateQueries({ queryKey: ["bookings"] });
+      void qc.invalidateQueries({ queryKey: ["payments"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      setMsg({
+        ok: true,
+        text: `La reserva ${bookingCode} está lista para registrar el pago.`,
+        bookingCreated: true,
+      });
+    },
+    onError: (e) => setMsg({
+      ok: false,
+      text: e instanceof Error ? e.message : "No pudimos preparar el pago.",
+    }),
   });
 
   return (
@@ -39,7 +73,29 @@ function ClientQuotes({ actor }: { actor: RequestActor }) {
         <KpiCard label="Aprobadas" value={quotes.filter((q) => q.status === "Aprobada").length} />
         <KpiCard label="Total" value={quotes.length} />
       </div>
-      {msg && <Notice error={!msg.ok} text={msg.text} onDismiss={() => setMsg(null)} />}
+      {msg && (
+        <div className="mb-4">
+          <Notice error={!msg.ok} text={msg.text} onDismiss={() => setMsg(null)} />
+          {msg.ok && msg.bookingCreated && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Link
+                to="/reservas"
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Ver mi reserva
+              </Link>
+              <Link
+                to="/pagos"
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+              >
+                <CreditCard className="h-4 w-4" />
+                Registrar pago
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
       {quotes.length === 0 ? <div className="rounded-xl border border-border bg-card"><EmptyState title="Aún no tienes cotizaciones" description="Cuando tu asesor envíe una propuesta, la verás aquí." /></div> : (
         <div className="space-y-5">
           {quotes.map((q) => (
@@ -68,6 +124,40 @@ function ClientQuotes({ actor }: { actor: RequestActor }) {
                     <div className="flex gap-2">
                       <Button variant="destructive" className="flex-1" onClick={() => setPending({ quote: q, decision: "Rechazada" })}><X className="h-4 w-4" />Rechazar</Button>
                       <Button variant="primary" className="flex-1" onClick={() => setPending({ quote: q, decision: "Aprobada" })}><Check className="h-4 w-4" />Aprobar</Button>
+                    </div>
+                  )}
+                  {q.status === "Aprobada" && q.bookingCode && (
+                    <div className="space-y-2 rounded-lg border border-success/25 bg-success-soft p-3">
+                      <p className="text-sm font-medium text-success">Reserva {q.bookingCode} lista</p>
+                      <Link
+                        to="/reservas"
+                        className="flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
+                      >
+                        Ver mi reserva
+                      </Link>
+                      <Link
+                        to="/pagos"
+                        className="flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+                      >
+                        <CreditCard className="h-4 w-4" />
+                        Registrar pago
+                      </Link>
+                    </div>
+                  )}
+                  {q.status === "Aprobada" && !q.bookingCode && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Completa la reserva con los viajeros registrados para habilitar los pagos.
+                      </p>
+                      <Button
+                        variant="primary"
+                        className="w-full"
+                        disabled={ensureBooking.isPending}
+                        onClick={() => ensureBooking.mutate(q)}
+                      >
+                        <CreditCard className="h-4 w-4" />
+                        {ensureBooking.isPending ? "Preparando reserva…" : "Continuar al pago"}
+                      </Button>
                     </div>
                   )}
                 </div>

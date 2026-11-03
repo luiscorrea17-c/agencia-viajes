@@ -93,3 +93,7 @@ export async function updateRequest(
 export function canAccessRequests(actor: RequestActor): boolean {
   return actor.active && canAccess(actor.role, "/solicitudes");
 }
+
+export function canManageRequests(actor: RequestActor): boolean {
+  return actor.active && (actor.role === "Asesor" || actor.role === "Cliente");
+}

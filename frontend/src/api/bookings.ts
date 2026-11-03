@@ -36,6 +36,11 @@ export interface Booking {
   history: AuditEntry[];
 }
 
+export type BookingPaymentOption = Pick<
+  Booking,
+  "id" | "code" | "clientId" | "clientName" | "destination" | "paymentDueDate" | "totalCOP" | "paidCOP" | "status"
+>;
+
 export interface BookingSource extends Quote {
   clientId: string;
   startDate: string;
@@ -87,17 +92,17 @@ export const DEFAULT_BOOKING_CONDITIONS =
   "Tarifa sujeta a condiciones del proveedor aéreo y hotelero. Cambios de fecha o pasajero hasta 7 días antes de la salida.";
 
 export const canManageBooking = (actor: RequestActor) =>
-  actor.active && (actor.role === "Administrador" || actor.role === "Asesor");
+  actor.active && actor.role === "Asesor";
 
 export const canReconcile = (actor: RequestActor) =>
-  actor.active && (actor.role === "Administrador" || actor.role === "Contabilidad");
+  actor.active && actor.role === "Contabilidad";
 
 export async function listBookings(_actor: RequestActor): Promise<Booking[]> {
   return apiRequest<Booking[]>("/api/bookings");
 }
 
-export async function listBookingOptions(_actor: RequestActor): Promise<Booking[]> {
-  return apiRequest<Booking[]>("/api/bookings/options");
+export async function listBookingOptions(_actor: RequestActor): Promise<BookingPaymentOption[]> {
+  return apiRequest<BookingPaymentOption[]>("/api/bookings/options");
 }
 
 export async function bookingSources(_actor: RequestActor): Promise<BookingSource[]> {

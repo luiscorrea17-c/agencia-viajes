@@ -28,7 +28,10 @@ export function RequestForm({
   onSaved: (request: TravelRequest) => Promise<void>;
 }) {
   const [input, setInput] = useState<RequestInput>({
-    clientId: request?.clientId ?? prefill?.clientId ?? (actor.role === "Cliente" ? actor.id : ""),
+    clientId:
+      request?.clientId ??
+      prefill?.clientId ??
+      (actor.role === "Cliente" ? (clients[0]?.id ?? "") : ""),
     destination: request?.destination ?? prefill?.destination ?? "",
     startDate: request?.startDate ?? prefill?.startDate ?? "",
     endDate: request?.endDate ?? prefill?.endDate ?? "",
@@ -39,6 +42,8 @@ export function RequestForm({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const missingClientRecord =
+    actor.role === "Cliente" && !clients.some((client) => client.id === input.clientId);
 
   const set = <K extends keyof RequestInput>(key: K, value: RequestInput[K]) =>
     setInput((previous) => ({ ...previous, [key]: value }));
@@ -66,7 +71,15 @@ export function RequestForm({
       maxWidthClass="max-w-xl"
       onClose={() => !busy && onClose()}
     >
-      <Notice error text={error} />
+      <Notice
+        error
+        text={
+          error ||
+          (missingClientRecord
+            ? "Tu cuenta aún no tiene un expediente de cliente vinculado. Contacta a tu asesor para habilitar solicitudes de viaje."
+            : "")
+        }
+      />
       <form onSubmit={submit} className="space-y-4">
         {actor.role !== "Cliente" && (
           <label className="block text-sm font-medium">
@@ -179,7 +192,7 @@ export function RequestForm({
           <Button type="button" disabled={busy} onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" type="submit" disabled={busy}>
+          <Button variant="primary" type="submit" disabled={busy || missingClientRecord}>
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             {busy ? "Guardando…" : "Guardar"}
           </Button>

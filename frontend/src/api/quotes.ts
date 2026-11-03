@@ -42,6 +42,7 @@ export interface Quote {
   totalCOP: number;
   validUntil: string;
   status: QuoteStatus;
+  bookingCode?: string | undefined;
   advisorDecisionLog: string;
   updatedBy: string;
   updatedAt: string;
@@ -97,11 +98,17 @@ export const canEditQuote = (actor: RequestActor, quote: Quote) =>
   actor.role === "Asesor" && quote.status === "Borrador";
 
 export const canApproveDiscount = (actor: RequestActor, quote: Quote) =>
-  actor.role === "Administrador" && quote.status === "Borrador" &&
-  quote.requiresAdminApproval && !quote.adminApprovedBy;
+  actor.role === "Administrador" &&
+  quote.status === "Borrador" &&
+  quote.totalCOP > 0 &&
+  quote.requiresAdminApproval &&
+  !quote.adminApprovedBy;
 
 export const canRespondQuote = (actor: RequestActor, quote: Quote) =>
-  actor.role === "Cliente" && quote.status === "Enviada" && quote.clientEmail === actor.email;
+  actor.role === "Cliente" &&
+  quote.status === "Enviada" &&
+  quote.totalCOP > 0 &&
+  quote.clientEmail === actor.email;
 
 export async function listQuotes(_actor: RequestActor): Promise<Quote[]> {
   return apiRequest<Quote[]>("/api/quotes");
@@ -148,4 +155,14 @@ export async function respondQuote(
     method: "POST",
     body: jsonBody({ decision }),
   });
+}
+
+export async function ensureApprovedQuoteBooking(
+  _actor: RequestActor,
+  id: string,
+): Promise<{ bookingCode: string }> {
+  return apiRequest<{ bookingCode: string }>(
+    `/api/quotes/${encodeURIComponent(id)}/ensure-booking`,
+    { method: "POST" },
+  );
 }

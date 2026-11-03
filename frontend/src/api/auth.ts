@@ -34,9 +34,9 @@ export const ROLES: Role[] = ["Administrador", "Asesor", "Contabilidad", "Client
 
 export const NAV_ITEMS: NavItem[] = [
   { label: "Inicio", path: "/inicio", allowedRoles: ["Administrador", "Asesor", "Contabilidad", "Cliente"] },
-  { label: "Expedientes", path: "/expedientes", allowedRoles: ["Administrador", "Asesor", "Contabilidad", "Cliente"], category: "Gestión comercial" },
+  { label: "Expedientes", path: "/expedientes", allowedRoles: ["Administrador", "Asesor", "Cliente"], category: "Gestión comercial" },
   { label: "Solicitudes", path: "/solicitudes", allowedRoles: ["Administrador", "Asesor", "Cliente"], category: "Gestión comercial" },
-  { label: "Cotizador IA", path: "/cotizador-ia", allowedRoles: ["Administrador", "Asesor", "Contabilidad"], category: "Gestión comercial" },
+  { label: "Cotizador IA", path: "/cotizador-ia", allowedRoles: ["Administrador", "Asesor"], category: "Gestión comercial" },
   { label: "Mis cotizaciones", path: "/mis-cotizaciones", allowedRoles: ["Cliente"], category: "Gestión comercial" },
   { label: "Reservas", path: "/reservas", allowedRoles: ["Administrador", "Asesor", "Cliente"], category: "Reservas y pagos" },
   { label: "Pagos", path: "/pagos", allowedRoles: ["Administrador", "Contabilidad", "Cliente"], category: "Reservas y pagos" },
@@ -114,6 +114,11 @@ export interface UserInput {
   role: Role;
   branch: string;
   password?: string;
+  clientPhone?: string;
+  clientDocType?: "CC" | "NIT" | "CE" | "Pasaporte";
+  clientDocNumber?: string;
+  clientType?: "Persona" | "Empresa";
+  clientSegment?: "Estándar" | "Corporativo" | "VIP";
 }
 
 export async function listUsers(_actor: PublicUser): Promise<PublicUser[]> {

@@ -14,8 +14,8 @@ from app.security import require_roles
 
 router = APIRouter(prefix="/api/clients")
 DB = Annotated[Session, Depends(get_db)]
-READ_ROLES = ("Administrador", "Asesor", "Contabilidad", "Cliente")
-EDIT_ROLES = ("Administrador", "Asesor", "Cliente")
+READ_ROLES = ("Administrador", "Asesor", "Cliente")
+EDIT_ROLES = ("Asesor", "Cliente")
 
 
 def client_record(db: Session, row) -> dict:
@@ -164,7 +164,7 @@ def get_client(
 def create_client(
     body: ClientInput,
     db: DB,
-    actor: Annotated[dict, Depends(require_roles("Administrador", "Asesor"))],
+    actor: Annotated[dict, Depends(require_roles("Asesor"))],
 ):
     validate_client(body)
     client_id = new_id()

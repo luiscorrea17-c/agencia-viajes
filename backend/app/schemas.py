@@ -35,6 +35,11 @@ class UserInput(APIModel):
     role: Role
     branch: str
     password: str | None = None
+    client_phone: str | None = None
+    client_doc_type: DocType | None = None
+    client_doc_number: str | None = None
+    client_type: ClientType = "Persona"
+    client_segment: ClientSegment = "Estándar"
 
 
 class ActiveInput(APIModel):
@@ -84,8 +89,9 @@ class QuoteItemInput(APIModel):
     id: str | None = None
     category: ServiceCategory
     description: str
-    quantity: int
+    quantity: int = Field(gt=0)
     unit_price_cop: int = Field(
+        gt=0,
         validation_alias=AliasChoices("unitPriceCOP", "unitPriceCop", "unit_price_cop")
     )
     is_ai_generated: bool = False
@@ -95,7 +101,7 @@ class QuoteItemInput(APIModel):
 class QuoteDraftInput(APIModel):
     commercial_description: str
     is_description_ai_generated: bool = False
-    items: list[QuoteItemInput]
+    items: list[QuoteItemInput] = Field(min_length=1)
     season_surcharge_percent: float
     discount_percent: float
     valid_until: date

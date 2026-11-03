@@ -46,8 +46,10 @@ def dashboard(db: DB, actor: CurrentUser):
                ORDER BY q.created_at DESC""",
             id=actor["id"],
         ).mappings()
-    else:
+    elif role in ("Administrador", "Asesor"):
         quote_rows = execute(db, "SELECT * FROM quotes ORDER BY created_at DESC").mappings()
+    else:
+        quote_rows = []
     quotes = [quote_record(db, row) for row in quote_rows]
 
     if role in ("Administrador", "Asesor"):

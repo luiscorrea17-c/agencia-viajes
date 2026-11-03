@@ -161,9 +161,11 @@ function Payments({ actor }: { actor: PublicUser }) {
         subtitle={
           actor.role === "Cliente"
             ? "Registra abonos parciales o totales, adjunta tu comprobante y consulta su validación."
-            : "Concilia abonos recibidos, verifica comprobantes y gestiona devoluciones."
+            : actor.role === "Contabilidad"
+              ? "Concilia abonos recibidos, verifica comprobantes y gestiona devoluciones."
+              : "Consulta pagos, saldos y comprobantes."
         }
-        actions={
+        actions={actor.role === "Cliente" && (
           <Button
             variant="primary"
             onClick={() => {
@@ -182,7 +184,7 @@ function Payments({ actor }: { actor: PublicUser }) {
             <Plus className="h-4 w-4" />
             Registrar abono
           </Button>
-        }
+        )}
       />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">

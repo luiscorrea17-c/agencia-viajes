@@ -142,6 +142,19 @@ function Editor({ actor }: { actor: RequestActor }) {
         }
       />
 
+      {isAdvisor && (
+        <p
+          role="note"
+          className="mb-5 flex items-start gap-2.5 rounded-lg border border-ai/25 bg-ai-soft px-3.5 py-3 text-sm text-ai"
+        >
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          Al generar, se comparten con Gemini el destino, las fechas, el número de viajeros,
+          el presupuesto y las preferencias. No se incluyen nombre, correo ni documentos;
+          evita escribir datos personales en las preferencias. Los precios son estimaciones:
+          verifica tarifas y disponibilidad antes de enviar.
+        </p>
+      )}
+
       <div className="mb-5 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         <KpiCard label="Total" value={quotes.length} />
         <KpiCard label="Borradores" value={quotes.filter((q) => q.status === "Borrador").length} />
@@ -321,6 +334,17 @@ function QuoteDetail({
   const needsApproval =
     totals.requiresAdminApproval &&
     !(quote.adminApprovedBy && draft.discountPercent === quote.discountPercent);
+  const invalidServiceValue =
+    draft.items.length === 0 ||
+    draft.items.some(
+      (item) =>
+        !Number.isInteger(item.quantity) ||
+        item.quantity < 1 ||
+        !Number.isInteger(item.unitPriceCOP) ||
+        item.unitPriceCOP <= 0
+    );
+  const invalidQuoteTotal = totals.totalCOP <= 0;
+  const invalidQuoteValue = invalidServiceValue || invalidQuoteTotal;
 
   const save = useMutation({
     mutationFn: () => saveQuoteDraft(actor, quote.id, draft),
@@ -393,7 +417,7 @@ function QuoteDetail({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {quote.status === "Aprobada" && (actor.role === "Asesor" || actor.role === "Administrador") && (
+          {quote.status === "Aprobada" && actor.role === "Asesor" && (
             <Link
               to="/reservas"
               className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
@@ -410,13 +434,16 @@ function QuoteDetail({
           )}
           {editable && (
             <>
-              <Button disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+              <Button
+                disabled={!dirty || invalidQuoteValue || save.isPending}
+                onClick={() => save.mutate()}
+              >
                 <Save className="h-4 w-4" />
                 {save.isPending ? "Guardando…" : "Guardar"}
               </Button>
               <Button
                 variant="primary"
-                disabled={dirty || needsApproval || send.isPending}
+                disabled={dirty || invalidQuoteValue || needsApproval || send.isPending}
                 onClick={() => setConfirm("send")}
                 title={dirty ? "Guarda los cambios antes de enviar" : undefined}
               >
@@ -542,13 +569,23 @@ function QuoteDetail({
                         <input
                           aria-label="Valor unitario"
                           type="number"
-                          min={0}
+                          min={1}
                           step={1000}
                           disabled={!editable}
                           value={i.unitPriceCOP}
+                          aria-invalid={i.unitPriceCOP <= 0}
+                          aria-describedby={i.unitPriceCOP <= 0 ? `quote-item-${i.id}-price-error` : undefined}
                           onChange={(e) => setItem(i.id, { unitPriceCOP: Number(e.target.value) })}
                           className={cellInput}
                         />
+                        {i.unitPriceCOP <= 0 && (
+                          <span
+                            id={`quote-item-${i.id}-price-error`}
+                            className="mt-1 block text-xs font-medium text-destructive"
+                          >
+                            El valor unitario debe ser mayor que $0.
+                          </span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 pt-3.5 font-medium">
                         {cop(i.quantity * i.unitPriceCOP)}
@@ -632,6 +669,16 @@ function QuoteDetail({
         </div>
 
         <aside className="space-y-4">
+          {editable && invalidQuoteValue && (
+            <p
+              role="alert"
+              className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
+            >
+              {invalidServiceValue
+                ? "Cada cotización requiere al menos un servicio con cantidad y valor unitario mayores que cero."
+                : "El total de la cotización debe ser mayor que $0. Ajusta los precios o el descuento."}
+            </p>
+          )}
           <Totals quote={{ ...draft, ...totals }} />
 
           <div className="rounded-xl border border-border bg-card p-4 text-xs">

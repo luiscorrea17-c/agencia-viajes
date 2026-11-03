@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canAccessRequests, createRequest, listRequests, REQUEST_STATUSES } from "@/api/requests";
+import { canAccessRequests, canManageRequests, createRequest, listRequests, REQUEST_STATUSES } from "@/api/requests";
 import { mockJsonResponse, sessionToken } from "./api-helpers";
 
 const actor = (role: "Administrador" | "Asesor" | "Contabilidad" | "Cliente") => ({
@@ -18,6 +18,9 @@ describe("Solicitudes: contratos HTTP", () => {
     expect(canAccessRequests(actor("Administrador"))).toBe(true);
     expect(canAccessRequests(actor("Cliente"))).toBe(true);
     expect(canAccessRequests(actor("Contabilidad"))).toBe(false);
+    expect(canManageRequests(actor("Administrador"))).toBe(false);
+    expect(canManageRequests(actor("Asesor"))).toBe(true);
+    expect(canManageRequests(actor("Cliente"))).toBe(true);
   });
 
   it("consulta las solicitudes por HTTP autenticado", async () => {

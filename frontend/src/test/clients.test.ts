@@ -29,9 +29,11 @@ describe("Clientes: contratos HTTP", () => {
   });
 
   it("aplica permisos de creación y edición del expediente", () => {
-    expect(canCreateClient(actor("Administrador"))).toBe(true);
+    expect(canCreateClient(actor("Administrador"))).toBe(false);
     expect(canCreateClient(actor("Asesor"))).toBe(true);
     expect(canCreateClient(actor("Cliente"))).toBe(false);
+    expect(canEditClient(actor("Administrador"), "client-1")).toBe(false);
+    expect(canEditClient(actor("Asesor"), "client-1")).toBe(true);
     expect(canEditClient(actor("Contabilidad"), "client-1")).toBe(false);
     expect(canEditClient(actor("Cliente"), "client-1")).toBe(true);
   });

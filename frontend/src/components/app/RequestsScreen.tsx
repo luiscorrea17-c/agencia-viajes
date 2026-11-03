@@ -2,7 +2,7 @@ import { Suspense, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { CalendarDays, CircleCheck, Clock3, FileText, Mail, MapPin, Pencil, Phone, Plus, Users, Wand2 } from "lucide-react";
-import { REQUEST_STATUSES, type TravelRequest, type RequestActor, type RequestInput, type RequestStatus } from "@/api";
+import { REQUEST_STATUSES, canManageRequests, type TravelRequest, type RequestActor, type RequestInput, type RequestStatus } from "@/api";
 import { useAuth } from "@/lib/auth";
 import { ModulePlaceholder } from "./ModulePlaceholder";
 import { AuditTrail, Filters, Notice } from "./OperationUi";
@@ -31,6 +31,7 @@ function RequestList({ actor }: { actor: RequestActor }) {
   const [form, setForm] = useState<{ request: TravelRequest | null; prefill?: Partial<RequestInput> | undefined } | null>(null);
   const [notice, setNotice] = useState("");
   const customer = actor.role === "Cliente";
+  const canManage = canManageRequests(actor);
   const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const rows = requests.filter((request) => (!status || request.status === status) && normalize(`${request.destination} ${request.clientName} ${request.code}`).includes(normalize(search)));
   const columns: Column<TravelRequest>[] = [
@@ -44,7 +45,7 @@ function RequestList({ actor }: { actor: RequestActor }) {
   ];
   return <div>
     <PageHeader title={customer ? "Mis solicitudes" : "Solicitudes"} subtitle={customer ? "Indica destino, fechas y presupuesto para que tu asesor arme una propuesta." : "Gestiona solicitudes de viaje y abre cotizaciones."}
-      actions={<Button variant="primary" onClick={() => setForm({ request: null })}><Plus className="h-4 w-4" />{customer ? "Pedir viaje" : "Registrar solicitud"}</Button>} />
+      actions={canManage && <Button variant="primary" onClick={() => setForm({ request: null })}><Plus className="h-4 w-4" />{customer ? "Pedir viaje" : "Registrar solicitud"}</Button>} />
     {customer ? (
       <TravelOffersBanner
         onSelectOffer={(offer) => {
@@ -87,7 +88,7 @@ function RequestList({ actor }: { actor: RequestActor }) {
       panelLabel="Detalle de solicitud"
       emptyTitle={search || status ? "Sin coincidencias" : "Sin solicitudes registradas"}
       emptyDescription={search || status ? "Limpia la búsqueda o cambia el estado seleccionado." : "Registra destino, fechas tentativas y número de viajeros."}
-      renderPanel={(request) => <RequestDetail request={request} actor={actor} onEdit={() => setForm({ request })} />} />
+      renderPanel={(request) => <RequestDetail request={request} actor={actor} editable={canManage} onEdit={() => setForm({ request })} />} />
     <p className="mt-3 text-xs text-muted-foreground">{rows.length} de {requests.length} solicitudes</p>
     {form && <RequestForm actor={actor} clients={clients} request={form.request} prefill={form.prefill} onClose={() => setForm(null)} onSaved={async (request) => {
       await Promise.all([
@@ -101,10 +102,10 @@ function RequestList({ actor }: { actor: RequestActor }) {
   </div>;
 }
 
-function RequestDetail({ request, actor, onEdit }: { request: TravelRequest; actor: RequestActor; onEdit: () => void }) {
+function RequestDetail({ request, actor, editable, onEdit }: { request: TravelRequest; actor: RequestActor; editable: boolean; onEdit: () => void }) {
   return <div>
     <img src={request.thumbnailUrl} alt={request.destination} width={1024} height={768} loading="lazy" className="aspect-[16/9] w-full rounded-lg object-cover" />
-    <div className="mt-4 flex items-start justify-between gap-2"><div><p className="font-mono text-xs text-muted-foreground">{request.code}</p><h2 className="mt-1 flex items-center gap-1.5 break-words font-display text-xl font-semibold"><MapPin className="h-4 w-4 shrink-0 text-primary" />{request.destination}</h2></div><Button variant="ghost" onClick={onEdit} title="Editar solicitud" aria-label="Editar solicitud" className="h-8 w-8 shrink-0 p-0"><Pencil className="h-4 w-4" /></Button></div>
+    <div className="mt-4 flex items-start justify-between gap-2"><div><p className="font-mono text-xs text-muted-foreground">{request.code}</p><h2 className="mt-1 flex items-center gap-1.5 break-words font-display text-xl font-semibold"><MapPin className="h-4 w-4 shrink-0 text-primary" />{request.destination}</h2></div>{editable && <Button variant="ghost" onClick={onEdit} title="Editar solicitud" aria-label="Editar solicitud" className="h-8 w-8 shrink-0 p-0"><Pencil className="h-4 w-4" /></Button>}</div>
     <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
       <StatusChip status={request.status} />
       {actor.role === "Asesor" && request.status !== "Cerrada" && (

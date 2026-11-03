@@ -1,11 +1,13 @@
-import re
+from collections.abc import Mapping
 from datetime import date, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.ai import AIProviderError, TripBrief, generate_quote_suggestion
+from app.booking_service import create_booking_from_quote
 from app.common import audit, code, fail_integrity, iso, new_id
 from app.database import execute, get_db
 from app.schemas import QuoteDraftInput, QuoteResponseInput
@@ -14,8 +16,7 @@ from app.security import require_roles
 
 router = APIRouter(prefix="/api/quotes")
 DB = Annotated[Session, Depends(get_db)]
-STAFF = ("Administrador", "Asesor", "Contabilidad")
-CATEGORIES = ("Vuelos", "Alojamiento", "Traslados", "Actividades", "Asistencia")
+STAFF = ("Administrador", "Asesor")
 
 
 def quote_record(db: Session, row) -> dict:
@@ -117,6 +118,25 @@ def set_request_status(db: Session, request_id: str, actor: dict, note: str):
     audit(db, "request", request_id, note, actor)
 
 
+def quote_brief(request: Mapping[str, Any]) -> TripBrief:
+    return {
+        "destination": request["destination"],
+        "start_date": request["start_date"].isoformat(),
+        "end_date": request["end_date"].isoformat(),
+        "travelers_count": request["travelers_count"],
+        "budget_cop": request["budget_cop"],
+        "notes": request["notes"] or "",
+    }
+
+
+def require_positive_quote_total(quote: Mapping[str, Any]) -> None:
+    if quote["total_cop"] <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede aprobar, enviar o reservar una cotización con total de cero.",
+        )
+
+
 @router.get("")
 def list_quotes(db: DB, actor: Annotated[dict, Depends(require_roles(*STAFF, "Cliente"))]):
     if actor["role"] == "Cliente":
@@ -137,7 +157,15 @@ def list_quotes(db: DB, actor: Annotated[dict, Depends(require_roles(*STAFF, "Cl
         if row["status"] == "Enviada" and row["valid_until"] < today:
             row = dict(row)
             row["status"] = "Expirada"
-        result.append(quote_record(db, row))
+        record = quote_record(db, row)
+        if actor["role"] == "Cliente":
+            booking = execute(
+                db,
+                "SELECT code FROM bookings WHERE quote_id = :quote_id",
+                quote_id=row["id"],
+            ).mappings().first()
+            record["bookingCode"] = booking["code"] if booking else None
+        result.append(record)
     return result
 
 
@@ -151,6 +179,25 @@ def create_from_request(
         db,
         """SELECT r.*, c.name AS client_name, c.email AS client_email
            FROM travel_requests r JOIN client_records c ON c.id = r.client_id
+           WHERE r.id = :id""",
+        id=request_id,
+    ).mappings().first()
+    if not request:
+        raise HTTPException(status_code=404, detail="La solicitud no está disponible.")
+    if request["status"] == "Cerrada":
+        raise HTTPException(status_code=409, detail="La solicitud está cerrada.")
+
+    db.rollback()  # Release the read-only transaction before waiting on Gemini.
+    try:
+        brief = quote_brief(request)
+        suggestion = generate_quote_suggestion(brief)
+    except AIProviderError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+    request = execute(
+        db,
+        """SELECT r.*, c.name AS client_name, c.email AS client_email
+           FROM travel_requests r JOIN client_records c ON c.id = r.client_id
            WHERE r.id = :id FOR UPDATE OF r""",
         id=request_id,
     ).mappings().first()
@@ -158,6 +205,11 @@ def create_from_request(
         raise HTTPException(status_code=404, detail="La solicitud no está disponible.")
     if request["status"] == "Cerrada":
         raise HTTPException(status_code=409, detail="La solicitud está cerrada.")
+    if quote_brief(request) != brief:
+        raise HTTPException(
+            status_code=409,
+            detail="La solicitud cambió durante la generación. Intenta de nuevo.",
+        )
     execute(
         db,
         """UPDATE quotes SET status = 'Expirada'
@@ -176,37 +228,17 @@ def create_from_request(
         "SELECT COALESCE(MAX(version), 0) + 1 FROM quotes WHERE request_id = :id",
         id=request_id,
     ).scalar_one()
-    nights = max(1, (request["end_date"] - request["start_date"]).days)
     budget = request["budget_cop"]
-    notes = request["notes"] or ""
-    premium = bool(re.search(r"boutique|5 estrellas|lujo|frente al mar|comunicad", notes, re.I))
-    weights = (0.34, 0.42, 0.08, 0.10, 0.06) if premium else (0.38, 0.36, 0.08, 0.12, 0.06)
-
-    def rounded(value: float) -> int:
-        return max(25000, int(value / 5000 + 0.5) * 5000)
-
-    if re.search("comunicad", notes, re.I):
-        hotel = f"Hotel en {request['destination']} con habitaciones comunicadas y desayuno ({nights} noches)"
-    elif re.search("centro hist", notes, re.I):
-        hotel = f"Hotel cerca del centro histórico en {request['destination']} con desayuno"
-    else:
-        hotel = f"Hotel seleccionado en {request['destination']} con desayuno incluido"
-    travelers = request["travelers_count"]
     descriptions = [
-        (CATEGORIES[0], f"Tiquete ida y regreso Bogotá – {request['destination']}, tarifa con equipaje", travelers, budget * weights[0] / travelers),
-        (CATEGORIES[1], hotel, nights, budget * weights[1] / nights),
-        (CATEGORIES[2], "Traslado privado aeropuerto – hotel – aeropuerto", 1, budget * weights[2]),
-        (CATEGORIES[3], f"Recorrido guiado y experiencia local en {request['destination']}", travelers, budget * weights[3] / travelers),
-        (CATEGORIES[4], "Asistencia médica integral durante el viaje", travelers, budget * weights[4] / travelers),
+        (
+            item.category,
+            item.description.strip(),
+            item.quantity,
+            item.unitPriceCOP,
+        )
+        for item in suggestion.items
     ]
-    base = sum(quantity * rounded(price) for _, _, quantity, price in descriptions)
-    description = (
-        f"Propuesta de {nights} {'noche' if nights == 1 else 'noches'} en {request['destination']} "
-        f"para {travelers} {'viajero' if travelers == 1 else 'viajeros'}, con distribución equilibrada "
-        "de vuelos, alojamiento con desayuno, traslados, actividad guiada y asistencia."
-    )
-    if notes.strip():
-        description += f" Incluye preferencias solicitadas: {notes.strip().removesuffix('.')}."
+    base = sum(quantity * price for _, _, quantity, price in descriptions)
     quote_id = new_id()
     try:
         row = execute(
@@ -223,11 +255,15 @@ def create_from_request(
             request_id=request_id,
             budget=budget,
             version=version,
-            description=description,
+            description=suggestion.commercialDescription.strip(),
             base=base,
             valid_until=date.today() + timedelta(days=15),
             actor=actor["id"],
-            log=append_decision(None, actor["name"], f"Borrador creado con distribución IA (versión {version})."),
+            log=append_decision(
+                None,
+                actor["name"],
+                f"Borrador preliminar sugerido por Gemini (versión {version}).",
+            ),
         ).mappings().one()
         for order, (category, item_description, quantity, price) in enumerate(descriptions):
             execute(
@@ -241,7 +277,7 @@ def create_from_request(
                 category=category,
                 description=item_description,
                 quantity=quantity,
-                price=rounded(price),
+                price=price,
                 order=order,
             )
         set_request_status(db, request_id, actor, f"En cotización ({row['code']})")
@@ -274,6 +310,12 @@ def save_draft(
     base = sum(item.quantity * item.unit_price_cop for item in body.items)
     surcharge = round(base * body.season_surcharge_percent / 100)
     discount = round((base + surcharge) * body.discount_percent / 100)
+    total = base + surcharge - discount
+    if total <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="El total de la cotización debe ser mayor que $0. Ajusta los precios o el descuento.",
+        )
     requires = body.discount_percent > 10
     execute(db, "DELETE FROM quote_items WHERE quote_id = :id", id=quote_id)
     for order, item in enumerate(body.items):
@@ -316,7 +358,7 @@ def save_draft(
         discount=discount,
         requires=requires,
         admin=admin_approved,
-        total=base + surcharge - discount,
+        total=total,
         valid=body.valid_until,
         actor=actor["id"],
         log=append_decision(
@@ -336,6 +378,7 @@ def approve_discount(
     quote = visible_quote(db, actor, quote_id, lock=True)
     if quote["status"] != "Borrador" or not quote["requires_admin_approval"] or quote["admin_approved_by"]:
         raise HTTPException(status_code=409, detail="Esta cotización no requiere aprobación de descuento.")
+    require_positive_quote_total(quote)
     row = execute(
         db,
         """UPDATE quotes SET admin_approved_by = :actor, updated_by = :actor,
@@ -359,6 +402,7 @@ def send_quote(
     quote = visible_quote(db, actor, quote_id, lock=True)
     if quote["status"] != "Borrador":
         raise HTTPException(status_code=409, detail="Solo se pueden enviar cotizaciones en borrador.")
+    require_positive_quote_total(quote)
     if quote["requires_admin_approval"] and not quote["admin_approved_by"]:
         raise HTTPException(status_code=409, detail="El descuento requiere aprobación del Administrador.")
     if quote["valid_until"] < date.today():
@@ -385,18 +429,57 @@ def respond_quote(
     quote = visible_quote(db, actor, quote_id, lock=True)
     if quote["status"] != "Enviada":
         raise HTTPException(status_code=409, detail="Esta cotización ya no admite respuesta.")
-    row = execute(
-        db,
-        """UPDATE quotes SET status = :status, updated_by = :actor,
-             advisor_decision_log = :log WHERE id = :id RETURNING *""",
-        id=quote_id,
-        status=body.decision,
-        actor=actor["id"],
-        log=append_decision(
-            quote["advisor_decision_log"],
-            actor["name"],
-            "Cliente aprobó la cotización." if body.decision == "Aprobada" else "Cliente rechazó la cotización.",
-        ),
-    ).mappings().one()
-    db.commit()
-    return quote_record(db, row)
+    require_positive_quote_total(quote)
+    booking = None
+    try:
+        row = execute(
+            db,
+            """UPDATE quotes SET status = :status, updated_by = :actor,
+                 advisor_decision_log = :log WHERE id = :id RETURNING *""",
+            id=quote_id,
+            status=body.decision,
+            actor=actor["id"],
+            log=append_decision(
+                quote["advisor_decision_log"],
+                actor["name"],
+                "Cliente aprobó la cotización." if body.decision == "Aprobada" else "Cliente rechazó la cotización.",
+            ),
+        ).mappings().one()
+        if body.decision == "Aprobada":
+            booking = create_booking_from_quote(db, row, actor)
+        result = quote_record(db, row)
+        if booking:
+            result["bookingCode"] = booking["code"]
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/{quote_id}/ensure-booking")
+def ensure_approved_quote_booking(
+    quote_id: str,
+    db: DB,
+    actor: Annotated[dict, Depends(require_roles("Cliente"))],
+):
+    quote = visible_quote(db, actor, quote_id, lock=True)
+    if quote["status"] != "Aprobada":
+        raise HTTPException(status_code=409, detail="Solo puedes continuar con cotizaciones aprobadas.")
+    require_positive_quote_total(quote)
+    try:
+        existing = execute(
+            db,
+            "SELECT code FROM bookings WHERE quote_id = :quote_id",
+            quote_id=quote_id,
+        ).mappings().first()
+        if existing:
+            db.commit()
+            return {"bookingCode": existing["code"]}
+
+        booking = create_booking_from_quote(db, quote, actor)
+        db.commit()
+        return {"bookingCode": booking["code"]}
+    except Exception:
+        db.rollback()
+        raise

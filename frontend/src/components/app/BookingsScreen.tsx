@@ -15,6 +15,7 @@ import {
   type BookingTraveler,
 } from "@/api/bookings";
 import type { PublicUser } from "@/api/auth";
+import { canAccess } from "@/api/auth";
 import type { BookingStatus } from "@/api/types";
 import { bookingsQuery } from "./operations-query";
 import { cop, fmtDate } from "./quote-query";
@@ -111,7 +112,9 @@ function Bookings({ actor }: { actor: PublicUser }) {
         subtitle={
           actor.role === "Cliente"
             ? "Viajeros registrados, servicios contratados, fecha límite y saldo pendiente."
-            : "Emite reservas desde cotizaciones aprobadas con viajeros nominados, condiciones y fecha límite."
+            : manage
+              ? "Emite reservas desde cotizaciones aprobadas con viajeros nominados, condiciones y fecha límite."
+              : "Consulta reservas, viajeros asociados, condiciones, fechas límite y saldos."
         }
         actions={
           manage && (
@@ -166,13 +169,13 @@ function Bookings({ actor }: { actor: PublicUser }) {
               <h2 className="mb-2.5 font-display text-xl font-semibold">{b.destination}</h2>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <StatusChip status={b.status} />
-                {b.status !== "cancelada" && (
+                {b.status !== "cancelada" && canAccess(actor.role, "/pagos") && (
                   <Link
                     to="/pagos"
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                   >
                     <CreditCard className="h-3.5 w-3.5" />
-                    {b.totalCOP - b.paidCOP > 0 ? "Registrar pago" : "Ver pagos"}
+                    {actor.role === "Cliente" && b.totalCOP - b.paidCOP > 0 ? "Registrar pago" : "Ver pagos"}
                   </Link>
                 )}
               </div>

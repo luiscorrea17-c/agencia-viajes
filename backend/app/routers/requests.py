@@ -1,3 +1,4 @@
+from uuid import UUID
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,7 +13,8 @@ from app.security import require_roles
 
 router = APIRouter(prefix="/api/requests")
 DB = Annotated[Session, Depends(get_db)]
-ROLES = ("Administrador", "Asesor", "Cliente")
+READ_ROLES = ("Administrador", "Asesor", "Cliente")
+WRITE_ROLES = ("Asesor", "Cliente")
 
 
 def request_record(db: Session, row) -> dict:
@@ -57,8 +59,28 @@ def validate_request(body: RequestInput) -> None:
         raise HTTPException(status_code=422, detail="Ingresa el destino.")
 
 
+def resolve_client_id(db: Session, actor: dict, requested_client_id: str) -> str:
+    if actor["role"] == "Cliente":
+        client = execute(
+            db,
+            "SELECT id FROM client_records WHERE user_id = :user_id",
+            user_id=actor["id"],
+        ).mappings().first()
+        if not client:
+            raise HTTPException(
+                status_code=409,
+                detail="Tu cuenta no tiene un expediente de cliente vinculado. Contacta a tu asesor para habilitar solicitudes de viaje.",
+            )
+        return str(client["id"])
+
+    try:
+        return str(UUID(requested_client_id))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Selecciona un cliente válido.") from None
+
+
 @router.get("")
-def list_requests(db: DB, actor: Annotated[dict, Depends(require_roles(*ROLES))]):
+def list_requests(db: DB, actor: Annotated[dict, Depends(require_roles(*READ_ROLES))]):
     if actor["role"] == "Cliente":
         rows = execute(
             db,
@@ -73,7 +95,7 @@ def list_requests(db: DB, actor: Annotated[dict, Depends(require_roles(*ROLES))]
 
 
 @router.get("/clients")
-def request_clients(db: DB, actor: Annotated[dict, Depends(require_roles(*ROLES))]):
+def request_clients(db: DB, actor: Annotated[dict, Depends(require_roles(*READ_ROLES))]):
     if actor["role"] == "Cliente":
         rows = execute(
             db,
@@ -102,7 +124,7 @@ def request_clients(db: DB, actor: Annotated[dict, Depends(require_roles(*ROLES)
 def get_request(
     request_id: str,
     db: DB,
-    actor: Annotated[dict, Depends(require_roles(*ROLES))],
+    actor: Annotated[dict, Depends(require_roles(*READ_ROLES))],
 ):
     row = execute(
         db, "SELECT * FROM travel_requests WHERE id = :id", id=request_id
@@ -117,12 +139,13 @@ def get_request(
 def create_request(
     body: RequestInput,
     db: DB,
-    actor: Annotated[dict, Depends(require_roles(*ROLES))],
+    actor: Annotated[dict, Depends(require_roles(*WRITE_ROLES))],
 ):
     validate_request(body)
-    if not execute(db, "SELECT id FROM client_records WHERE id = :id", id=body.client_id).first():
+    client_id = resolve_client_id(db, actor, body.client_id)
+    if not execute(db, "SELECT id FROM client_records WHERE id = :id", id=client_id).first():
         raise HTTPException(status_code=404, detail="Selecciona un cliente válido.")
-    ensure_client_access(db, actor, body.client_id)
+    ensure_client_access(db, actor, client_id)
     request_id = new_id()
     try:
         row = execute(
@@ -135,7 +158,7 @@ def create_request(
                RETURNING *""",
             id=request_id,
             code=code(db, "SOL"),
-            client_id=body.client_id,
+            client_id=client_id,
             destination=body.destination.strip(),
             start_date=body.start_date,
             end_date=body.end_date,
@@ -157,7 +180,7 @@ def update_request(
     request_id: str,
     body: RequestInput,
     db: DB,
-    actor: Annotated[dict, Depends(require_roles(*ROLES))],
+    actor: Annotated[dict, Depends(require_roles(*WRITE_ROLES))],
 ):
     validate_request(body)
     previous = execute(
@@ -166,7 +189,10 @@ def update_request(
     if not previous:
         raise HTTPException(status_code=404, detail="La solicitud no está disponible.")
     ensure_client_access(db, actor, str(previous["client_id"]))
-    ensure_client_access(db, actor, body.client_id)
+    client_id = resolve_client_id(db, actor, body.client_id)
+    if not execute(db, "SELECT id FROM client_records WHERE id = :id", id=client_id).first():
+        raise HTTPException(status_code=404, detail="Selecciona un cliente válido.")
+    ensure_client_access(db, actor, client_id)
     status_value = previous["status"] if actor["role"] == "Cliente" else body.status
     row = execute(
         db,
@@ -176,7 +202,7 @@ def update_request(
              updated_by = :actor
            WHERE id = :id RETURNING *""",
         id=request_id,
-        client_id=body.client_id,
+        client_id=client_id,
         destination=body.destination.strip(),
         start_date=body.start_date,
         end_date=body.end_date,

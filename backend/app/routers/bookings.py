@@ -2,7 +2,7 @@ import base64
 import binascii
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -10,6 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from app.booking_service import (
+    candidate_travelers,
+    create_booking_from_quote,
+    due_date,
+)
 from app.common import audit, audit_entries, code, ensure_client_access, iso, new_id
 from app.config import RECEIPTS_DIR
 from app.database import execute, get_db
@@ -22,12 +27,9 @@ router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
 BOOKING_READ = ("Administrador", "Asesor", "Cliente")
 PAYMENT_ROLES = ("Administrador", "Contabilidad", "Cliente")
-MANAGERS = ("Administrador", "Asesor")
-RECONCILERS = ("Administrador", "Contabilidad")
-DEFAULT_CONDITIONS = (
-    "Tarifa sujeta a condiciones del proveedor aéreo y hotelero. "
-    "Cambios de fecha o pasajero hasta 7 días antes de la salida."
-)
+MANAGERS = ("Asesor",)
+PAYMENT_REGISTRARS = ("Cliente",)
+RECONCILERS = ("Contabilidad",)
 MAX_RECEIPT_BYTES = 2 * 1024 * 1024
 
 
@@ -119,53 +121,6 @@ def payment_record(db: Session, row) -> dict:
     }
 
 
-def candidate_travelers(db: Session, client_id: str) -> list[dict]:
-    client = execute(
-        db,
-        """SELECT id, name, doc_type, doc_number, passport_expiry
-           FROM client_records WHERE id = :id""",
-        id=client_id,
-    ).mappings().first()
-    if not client:
-        return []
-    result = [
-        {
-            "id": str(client["id"]),
-            "fullName": client["name"],
-            "docType": client["doc_type"],
-            "docNumber": client["doc_number"],
-            "isMinor": False,
-            "passportExpiry": iso(client["passport_expiry"]),
-        }
-    ]
-    companions = execute(
-        db,
-        """SELECT id, full_name, doc_type, doc_number, is_minor, passport_expiry
-           FROM client_companions WHERE client_id = :id ORDER BY full_name""",
-        id=client_id,
-    ).mappings()
-    result.extend(
-        {
-            "id": str(item["id"]),
-            "fullName": item["full_name"],
-            "docType": item["doc_type"],
-            "docNumber": item["doc_number"],
-            "isMinor": item["is_minor"],
-            "passportExpiry": iso(item["passport_expiry"]),
-        }
-        for item in companions
-    )
-    return result
-
-
-def due_date(start_date: date) -> date:
-    target = start_date - timedelta(days=7)
-    if target > date.today():
-        return target
-    fallback = date.today() + timedelta(days=5)
-    return min(fallback, start_date)
-
-
 def client_visible(db: Session, actor: dict, client_id: str) -> bool:
     if actor["role"] != "Cliente":
         return True
@@ -199,22 +154,35 @@ def booking_options(
     db: DB,
     actor: Annotated[dict, Depends(require_roles(*PAYMENT_ROLES))],
 ):
-    query = "SELECT * FROM bookings WHERE status <> 'cancelada'"
+    query = """SELECT b.*, c.name AS payment_client_name
+               FROM bookings b JOIN client_records c ON c.id = b.client_id
+               WHERE b.status <> 'cancelada'"""
     params = {}
     if actor["role"] == "Cliente":
-        query = """SELECT b.* FROM bookings b JOIN client_records c ON c.id = b.client_id
-                   WHERE b.status <> 'cancelada' AND c.user_id = :user"""
+        query += " AND c.user_id = :user"
         params["user"] = actor["id"]
-    return [booking_record(db, row) for row in execute(db, query, **params).mappings()]
+    rows = execute(db, query, **params).mappings()
+    return [
+        {
+            "id": str(row["id"]),
+            "code": row["code"],
+            "clientId": str(row["client_id"]),
+            "clientName": row["payment_client_name"],
+            "destination": row["destination"],
+            "paymentDueDate": iso(row["payment_due_date"]),
+            "totalCOP": row["total_cop"],
+            "paidCOP": row["paid_cop"],
+            "status": row["status"],
+        }
+        for row in rows
+    ]
 
 
 @router.get("/bookings/sources")
 def booking_sources(
     db: DB,
-    actor: Annotated[dict, Depends(require_roles(*BOOKING_READ))],
+    actor: Annotated[dict, Depends(require_roles("Asesor"))],
 ):
-    if actor["role"] == "Cliente":
-        return []
     rows = execute(
         db,
         """SELECT q.* FROM quotes q
@@ -256,88 +224,20 @@ def create_booking(
     ).mappings().first()
     if not quote:
         raise HTTPException(status_code=404, detail="Selecciona una cotización aprobada.")
-    if execute(db, "SELECT 1 FROM bookings WHERE quote_id = :id", id=body.quote_id).first():
-        raise HTTPException(status_code=409, detail="Esta cotización ya tiene reserva.")
-    request = execute(
-        db,
-        """SELECT r.*, c.name AS client_name FROM travel_requests r
-           JOIN client_records c ON c.id = r.client_id WHERE r.id = :id""",
-        id=quote["request_id"],
-    ).mappings().one()
+    if quote["total_cop"] <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede crear una reserva con una cotización de total cero.",
+        )
     travelers = [item.model_dump(by_alias=True) for item in body.travelers]
-    if not travelers:
-        travelers = candidate_travelers(db, str(request["client_id"]))[: request["travelers_count"]]
-    if not travelers:
-        raise HTTPException(status_code=422, detail="Asocia al menos un viajero a la reserva.")
-    payment_due = body.payment_due_date or due_date(request["start_date"])
-    if payment_due > request["start_date"]:
-        raise HTTPException(status_code=422, detail="La fecha límite de pago no puede ser posterior a la salida.")
-    booking_id = new_id()
-    booking_code = code(db, "RES")
     try:
-        row = execute(
+        row = create_booking_from_quote(
             db,
-            """INSERT INTO bookings
-               (id, code, quote_id, request_id, client_id, destination, thumbnail_url,
-                start_date, end_date, payment_due_date, travelers_count, conditions,
-                total_cop, paid_cop, status, notes, created_by)
-               VALUES (:id, :code, :quote, :request, :client, :destination, :thumbnail,
-                       :start_date, :end_date, :due, :count, :conditions, :total, 0,
-                       'pendiente_pago', :notes, :actor) RETURNING *""",
-            id=booking_id,
-            code=booking_code,
-            quote=quote["id"],
-            request=request["id"],
-            client=request["client_id"],
-            destination=request["destination"],
-            thumbnail=request["thumbnail_url"],
-            start_date=request["start_date"],
-            end_date=request["end_date"],
-            due=payment_due,
-            count=request["travelers_count"],
-            conditions=body.conditions.strip() or DEFAULT_CONDITIONS,
-            total=quote["total_cop"],
-            notes=quote["commercial_description"] or "",
-            actor=actor["id"],
-        ).mappings().one()
-        for traveler in travelers:
-            execute(
-                db,
-                """INSERT INTO booking_travelers
-                   (id, booking_id, full_name, doc_type, doc_number, is_minor, passport_expiry)
-                   VALUES (:id, :booking, :name, :doc_type, :doc_number, :minor, :expiry)""",
-                id=new_id(),
-                booking=booking_id,
-                name=traveler["fullName"].strip(),
-                doc_type=traveler["docType"],
-                doc_number=traveler["docNumber"].strip(),
-                minor=traveler.get("isMinor", False),
-                expiry=traveler.get("passportExpiry"),
-            )
-        quote_items = execute(
-            db,
-            "SELECT * FROM quote_items WHERE quote_id = :id ORDER BY sort_order, id",
-            id=quote["id"],
-        ).mappings()
-        for item in quote_items:
-            execute(
-                db,
-                """INSERT INTO booking_agreed_items
-                   (id, booking_id, category, description, quantity, unit_price_cop)
-                   VALUES (:id, :booking, :category, :description, :quantity, :price)""",
-                id=new_id(),
-                booking=booking_id,
-                category=item["category"],
-                description=item["description"],
-                quantity=item["quantity"],
-                price=item["unit_price_cop"],
-            )
-        audit(
-            db,
-            "booking",
-            booking_id,
-            f"Reserva creada desde {quote['code']} ({len(travelers)} viajero(s) asociado(s))",
+            quote,
             actor,
+            travelers=travelers,
+            conditions=body.conditions,
+            payment_due_date=body.payment_due_date,
         )
         db.commit()
         return booking_record(db, row)
@@ -430,7 +330,7 @@ def decode_receipt(data_url: str, file_name: str | None) -> tuple[str, bytes]:
 def register_payment(
     body: PaymentInput,
     db: DB,
-    actor: Annotated[dict, Depends(require_roles(*PAYMENT_ROLES))],
+    actor: Annotated[dict, Depends(require_roles(*PAYMENT_REGISTRARS))],
 ):
     booking = execute(
         db, "SELECT * FROM bookings WHERE id = :id FOR UPDATE", id=body.booking_id

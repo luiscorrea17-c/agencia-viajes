@@ -21,9 +21,9 @@ export function HomeScreen() {
 
 function Home({ actor }: { actor: PublicUser }) {
   const { data } = useSuspenseQuery(dashboardQuery(actor));
-  const pendingQuotes = data.quotes.filter(
-    (q) => q.status === "Borrador" && q.requiresAdminApproval && !q.adminApprovedBy
-  );
+  const pendingQuotes = actor.role === "Administrador"
+    ? data.quotes.filter((q) => q.status === "Borrador" && q.requiresAdminApproval && !q.adminApprovedBy)
+    : [];
   const pendingPayments = data.payments.filter((p) => p.status === "por_conciliar");
   const upcoming = data.bookings
     .filter((b) => b.status !== "cancelada" && b.startDate >= new Date().toISOString().slice(0, 10))
@@ -53,10 +53,7 @@ function Home({ actor }: { actor: PublicUser }) {
       {accounting ? (
         <div className="mb-6 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
           <KpiCard label="Por conciliar" tone="alert" value={pendingPayments.length} />
-          <KpiCard
-            label="Cotizaciones enviadas"
-            value={data.quotes.filter((q) => q.status === "Enviada").length}
-          />
+          <KpiCard label="Pagos registrados" value={data.payments.length} />
           <KpiCard
             label="Validados (COP)"
             value={
@@ -69,10 +66,7 @@ function Home({ actor }: { actor: PublicUser }) {
               </span>
             }
           />
-          <KpiCard
-            label="Cotizaciones aprobadas"
-            value={data.quotes.filter((q) => q.status === "Aprobada").length}
-          />
+          <KpiCard label="Pagos pendientes de revisión" value={pendingPayments.length} />
         </div>
       ) : (
         <TravelRadarBanner cities={data.radar.cities} pulse={data.radar.pulse} />

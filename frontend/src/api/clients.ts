@@ -45,6 +45,7 @@ export interface ClientRecord {
 
 export type ClientActor = Omit<User, "password">;
 export type ClientInput = Omit<ClientRecord, "id" | "code" | "linkedRequests" | "auditLog">;
+
 export const CLIENT_LATENCY_MS = 0;
 export const CLIENT_TYPES: ClientType[] = ["Persona", "Empresa"];
 export const CLIENT_SEGMENTS: ClientSegment[] = ["Estándar", "Corporativo", "VIP"];
@@ -54,12 +55,12 @@ export class ClientApiError extends Error {}
 
 export function canCreateClient(actor: ClientActor) {
   return actor.active && canAccess(actor.role, "/expedientes") &&
-    (actor.role === "Administrador" || actor.role === "Asesor");
+    actor.role === "Asesor";
 }
 
 export function canEditClient(actor: ClientActor, _id: string) {
   return actor.active && canAccess(actor.role, "/expedientes") &&
-    actor.role !== "Contabilidad";
+    (actor.role === "Asesor" || actor.role === "Cliente");
 }
 
 export async function listClientRecords(_actor: ClientActor): Promise<ClientRecord[]> {

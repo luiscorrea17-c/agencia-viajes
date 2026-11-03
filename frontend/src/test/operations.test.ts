@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { listUsers, ROLES, type PublicUser } from "@/api/auth";
+import { canAccess, listUsers, NAV_ITEMS, ROLES, saveUser, type PublicUser } from "@/api/auth";
 import {
   BOOKING_STATUSES,
   canManageBooking,
@@ -33,11 +33,28 @@ describe("Reservas, pagos y usuarios: contratos HTTP", () => {
     expect(PAYMENT_STATUSES).toEqual(["por_conciliar", "validado", "rechazado", "devuelto"]);
   });
 
+  it("limita cada módulo a los roles aprobados", () => {
+    expect(NAV_ITEMS.find((item) => item.path === "/expedientes")?.allowedRoles).toEqual([
+      "Administrador",
+      "Asesor",
+      "Cliente",
+    ]);
+    expect(NAV_ITEMS.find((item) => item.path === "/cotizador-ia")?.allowedRoles).toEqual([
+      "Administrador",
+      "Asesor",
+    ]);
+    expect(canAccess("Contabilidad", "/expedientes")).toBe(false);
+    expect(canAccess("Contabilidad", "/cotizador-ia")).toBe(false);
+    expect(canAccess("Asesor", "/pagos")).toBe(false);
+    expect(canAccess("Cliente", "/mis-cotizaciones")).toBe(true);
+  });
+
   it("conserva las reglas de acceso de reservas y conciliación", () => {
-    expect(canManageBooking(actor("Administrador"))).toBe(true);
+    expect(canManageBooking(actor("Administrador"))).toBe(false);
     expect(canManageBooking(actor("Asesor"))).toBe(true);
     expect(canManageBooking(actor("Cliente"))).toBe(false);
     expect(canReconcile(actor("Contabilidad"))).toBe(true);
+    expect(canReconcile(actor("Administrador"))).toBe(false);
     expect(canReconcile(actor("Cliente"))).toBe(false);
   });
 
@@ -48,6 +65,30 @@ describe("Reservas, pagos y usuarios: contratos HTTP", () => {
 
     await expect(listUsers(actor("Administrador"))).resolves.toEqual([]);
     expect(fetchMock).toHaveBeenCalledWith("/api/users", expect.any(Object));
+  });
+
+  it("crea una cuenta de cliente con los datos para su expediente vinculado", async () => {
+    sessionToken();
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ id: "client-user-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      name: "Cliente",
+      email: "cliente@example.com",
+      role: "Cliente" as const,
+      branch: "",
+      password: "password-seguro",
+      clientPhone: "3001234567",
+      clientDocType: "CC" as const,
+      clientDocNumber: "123456789",
+      clientType: "Persona" as const,
+    };
+
+    await saveUser(actor("Administrador"), null, input);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/users",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(input) }),
+    );
   });
 
   it("crea reservas con quoteId y opciones en el cuerpo", async () => {

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   approveDiscount,
   canApproveDiscount,
+  canRespondQuote,
   computeTotals,
+  ensureApprovedQuoteBooking,
   QUOTE_STATUSES,
   respondQuote,
   type Quote,
@@ -76,6 +78,32 @@ describe("Cotizaciones: contratos HTTP", () => {
     expect(canApproveDiscount(actor("Administrador"), quote)).toBe(true);
     expect(canApproveDiscount(actor("Asesor"), quote)).toBe(false);
     expect(canApproveDiscount(actor("Administrador"), { ...quote, status: "Enviada" })).toBe(false);
+    expect(canApproveDiscount(actor("Administrador"), { ...quote, totalCOP: 0 })).toBe(false);
+  });
+
+  it("detecta total cero cuando el descuento consume el valor de los servicios", () => {
+    const totals = computeTotals(
+      [
+        {
+          id: "item-1",
+          category: "Vuelos",
+          description: "Vuelo",
+          quantity: 1,
+          unitPriceCOP: 100000,
+          isAiGenerated: false,
+          editedByAdvisor: false,
+        },
+      ],
+      0,
+      100,
+    );
+
+    expect(totals.totalCOP).toBe(0);
+  });
+
+  it("no permite al cliente responder una cotización enviada con total cero", () => {
+    expect(canRespondQuote(actor("Cliente"), { ...quote, status: "Enviada" })).toBe(true);
+    expect(canRespondQuote(actor("Cliente"), { ...quote, status: "Enviada", totalCOP: 0 })).toBe(false);
   });
 
   it("envía la aprobación del descuento al endpoint correspondiente", async () => {
@@ -104,6 +132,22 @@ describe("Cotizaciones: contratos HTTP", () => {
         method: "POST",
         body: JSON.stringify({ decision: "Aprobada" }),
       }),
+    );
+  });
+
+  it("permite preparar reserva para cotizaciones aprobadas anteriores", async () => {
+    sessionToken();
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ bookingCode: "RES-2026-001" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(ensureApprovedQuoteBooking(actor("Cliente"), "quote-1")).resolves.toEqual({
+      bookingCode: "RES-2026-001",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/quotes/quote-1/ensure-booking",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 });
