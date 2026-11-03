@@ -1,14 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import * as api from "@/api/auth";
-import type { Role, Session } from "@/api/auth";
+import type { Session } from "@/api/auth";
 
 interface AuthCtx {
   session: Session | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<Session>;
   logout: () => Promise<void>;
-  /** Solo para demo: cambia el rol de la sesión simulada. */
-  switchRole: (role: Role) => void;
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -18,8 +16,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setSession(api.getStoredSession());
-    setReady(true);
+    let active = true;
+    void api.restoreSession().then((restored) => {
+      if (!active) return;
+      setSession(restored);
+      setReady(true);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const value: AuthCtx = {
@@ -31,14 +36,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return s;
     },
     logout: async () => {
-      await api.logout();
-      setSession(null);
-    },
-    switchRole: (role) => {
-      if (!session) return;
-      const s = { ...session, user: { ...session.user, role } };
-      api.saveSession(s);
-      setSession(s);
+      try {
+        await api.logout();
+      } finally {
+        setSession(null);
+      }
     },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

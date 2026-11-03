@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Check, Download, FileCheck2, Paperclip, Plus, Undo2, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -6,6 +6,7 @@ import type { PublicUser } from "@/api/auth";
 import {
   PAYMENT_STATUSES,
   canReconcile,
+  getPaymentReceipt,
   reconcilePayment,
   registerPayment,
   type Payment,
@@ -35,6 +36,33 @@ function Payments({ actor }: { actor: PublicUser }) {
   const [error, setError] = useState(false);
   const [pending, setPending] = useState<{ payment: Payment; status: PaymentStatus } | null>(null);
   const [reason, setReason] = useState("");
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const selectedPayment = payments.find((payment) => payment.id === selected);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    if (!selectedPayment?.receiptUrl) {
+      setReceiptPreview(null);
+      return;
+    }
+    void getPaymentReceipt(selectedPayment.id)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setReceiptPreview(objectUrl);
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setReceiptPreview(null);
+        setError(true);
+        setMessage(cause instanceof Error ? cause.message : "No se pudo cargar el comprobante.");
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedPayment?.id, selectedPayment?.receiptUrl]);
 
   const available = bookings
     .map((b) => ({
@@ -233,9 +261,9 @@ function Payments({ actor }: { actor: PublicUser }) {
                         <FileCheck2 className="h-4 w-4 shrink-0 text-primary" />
                         <span className="truncate">{p.receiptName}</span>
                       </span>
-                      {p.receiptDataUrl && (
+                      {(p.receiptDataUrl || (selectedPayment?.id === p.id && receiptPreview)) && (
                         <a
-                          href={p.receiptDataUrl}
+                          href={p.receiptDataUrl ?? receiptPreview ?? undefined}
                           download={p.receiptName}
                           className="inline-flex shrink-0 items-center gap-1 font-medium text-primary hover:underline"
                         >
@@ -244,9 +272,12 @@ function Payments({ actor }: { actor: PublicUser }) {
                         </a>
                       )}
                     </div>
-                    {p.receiptDataUrl?.startsWith("data:image/") && (
+                    {(p.receiptDataUrl?.startsWith("data:image/") ||
+                      (selectedPayment?.id === p.id &&
+                        receiptPreview &&
+                        /\.(png|jpe?g|webp|gif)$/i.test(p.receiptName ?? ""))) && (
                       <img
-                        src={p.receiptDataUrl}
+                        src={p.receiptDataUrl ?? receiptPreview ?? undefined}
                         alt={`Comprobante ${p.code}`}
                         className="max-h-44 w-full rounded-lg border border-border object-contain bg-card"
                       />

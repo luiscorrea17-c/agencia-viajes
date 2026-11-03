@@ -2,14 +2,14 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, LogOut, MapPin, Menu, X } from "lucide-react";
-import { NAV_CATEGORIES, NAV_ITEMS, ROLES, canAccess, type NavCategory, type Role } from "@/api/auth";
+import { NAV_CATEGORIES, NAV_ITEMS, type NavCategory } from "@/api/auth";
 import { TravelLogo } from "@/components/ui/hero-section-6";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui";
 
 export function AppLayout() {
-  const { session, logout, switchRole } = useAuth();
+  const { session, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -52,12 +52,6 @@ export function AppLayout() {
     category,
     items: items.filter((n) => n.category === category),
   })).filter((group) => group.items.length > 0);
-
-  const onRole = (r: Role) => {
-    switchRole(r);
-    const here = window.location.pathname;
-    if (!canAccess(r, here)) navigate({ to: "/sin-permiso" });
-  };
 
   const onLogout = async () => {
     await queryClient.cancelQueries();
@@ -168,21 +162,7 @@ export function AppLayout() {
                   })}
                 </div>
 
-                {/* Selector de rol simulado y perfil */}
-                <div className="flex items-center justify-between gap-3 border-t border-border pt-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-5">
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium">Rol</span>
-                    <select
-                      value={user.role}
-                      onChange={(e) => onRole(e.target.value as Role)}
-                      className="h-8 rounded-lg border border-peach/50 bg-peach-soft px-2.5 text-xs font-semibold text-peach-foreground outline-none focus:border-peach"
-                    >
-                      {ROLES.map((r) => (
-                        <option key={r}>{r}</option>
-                      ))}
-                    </select>
-                  </label>
-
+                <div className="flex items-center justify-end gap-3 border-t border-border pt-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-5">
                   <div className="relative" ref={menuRef}>
                     <Button
                       variant="ghost"

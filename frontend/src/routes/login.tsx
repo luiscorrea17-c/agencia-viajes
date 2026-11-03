@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { AlertCircle, Eye, EyeOff, KeyRound, Loader2, Mail, SendHorizonal } from "lucide-react";
-import { DEMO_ACCOUNTS } from "@/api/auth";
 import { Button } from "@/components/ui/button";
 import { HeroSection } from "@/components/ui/hero-section-6";
 import { useAuth } from "@/lib/auth";
@@ -145,31 +144,6 @@ function LoginPage() {
             </p>
           )}
 
-          <div className="mt-4 border-t border-border pt-3.5">
-            <p className="text-xs font-medium text-muted-foreground">Acceso rápido de prueba</p>
-            <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-              {DEMO_ACCOUNTS.map((a) => {
-                const selected = email === a.email;
-                return (
-                  <button
-                    key={a.email}
-                    type="button"
-                    onClick={() => {
-                      setEmail(a.email);
-                      setPassword(a.password);
-                      setError(null);
-                    }}
-                    className={`rounded-lg border px-2 py-1.5 text-center text-xs font-medium transition-colors ${selected
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border bg-background text-foreground hover:border-primary/40 hover:bg-primary-soft hover:text-primary"
-                      }`}
-                  >
-                    {a.role}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </form>
       }
     />

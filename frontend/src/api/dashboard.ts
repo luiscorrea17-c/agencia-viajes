@@ -1,7 +1,8 @@
-import { canAccess, listUsers } from "./auth";
-import { listRequests, type RequestActor } from "./requests";
-import { listQuotes } from "./quotes";
-import { listBookings, listPayments } from "./bookings";
+import type { RequestActor, TravelRequest } from "./requests";
+import type { Quote } from "./quotes";
+import type { Booking, Payment } from "./bookings";
+import type { PublicUser } from "./auth";
+import { apiRequest } from "./http";
 
 export interface RadarCity {
   code: string;
@@ -131,19 +132,15 @@ export const DEFAULT_RADAR_PULSE: RadarPulse = {
 };
 
 export async function getDashboard(actor: RequestActor) {
-  const [requests, quotes, bookings, payments, users] = await Promise.all([
-    canAccess(actor.role, "/solicitudes") ? listRequests(actor) : [],
-    listQuotes(actor),
-    canAccess(actor.role, "/reservas") ? listBookings(actor) : [],
-    canAccess(actor.role, "/pagos") ? listPayments(actor) : [],
-    actor.role === "Administrador" ? listUsers(actor) : [],
-  ]);
+  const data = await apiRequest<{
+    requests: TravelRequest[];
+    quotes: Quote[];
+    bookings: Booking[];
+    payments: Payment[];
+    users: PublicUser[];
+  }>("/api/dashboard");
   return {
-    requests,
-    quotes,
-    bookings,
-    payments,
-    users,
+    ...data,
     radar: {
       cities: RADAR_CITIES,
       pulse: DEFAULT_RADAR_PULSE,
