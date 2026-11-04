@@ -1,37 +1,48 @@
-import os
-from pathlib import Path
-from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+from app.config import APP_ENV
+from app.database import engine
+from app.routers import auth, bookings, clients, dashboard, quotes, requests
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://postgres:postgres@localhost:5432/travelrequests",
+app = FastAPI(
+    title="TravelRequests API",
+    version="1.0.0",
+    description="API transaccional para solicitudes, cotizaciones, reservas y pagos.",
+    docs_url=None if APP_ENV == "production" else "/docs",
+    redoc_url=None if APP_ENV == "production" else "/redoc",
 )
-def normalize_database_url(value: str) -> str:
-    if value.startswith("postgres://"):
-        return value.replace("postgres://", "postgresql+psycopg://", 1)
-    if value.startswith("postgresql://"):
-        return value.replace("postgresql://", "postgresql+psycopg://", 1)
-    return value
+
+# Configuración permisiva de CORS para evitar errores con los dominios dinámicos de Vercel
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite peticiones desde cualquier frontend (Vercel, localhost, etc.)
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router)
+app.include_router(clients.router)
+app.include_router(requests.router)
+app.include_router(quotes.router)
+app.include_router(bookings.router)
+app.include_router(dashboard.router)
 
 
-DATABASE_URL = normalize_database_url(DATABASE_URL)
-JWT_SECRET = os.getenv("JWT_SECRET", "development-only-change-this-secret")
-JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "480"))
-APP_ENV = os.getenv("APP_ENV", "development")
-CORS_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv(
-        "API_CORS_ORIGINS", "http://localhost:5173,http://localhost:8080"
-    ).split(",")
-    if origin.strip()
-]
-RECEIPTS_DIR = Path(
-    os.getenv("RECEIPTS_DIR", str(ROOT_DIR.parent / "files" / "receipts"))
-).resolve()
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
-if APP_ENV == "production" and JWT_SECRET == "development-only-change-this-secret":
-    raise RuntimeError("JWT_SECRET must be configured outside development.")
+
+@app.get("/health/ready")
+def readiness():
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except SQLAlchemyError as error:
+        raise HTTPException(status_code=503, detail="No hay conexión con PostgreSQL.") from error
+    return {"status": "ready", "database": "connected"}

@@ -25,6 +25,18 @@ The public health endpoint is `/health`; `/health/ready` checks PostgreSQL.
 Interactive API documentation is available at `/docs` outside production.
 The private payment-receipt files are stored under `files/receipts/`.
 
+## Vercel deployment
+
+Deploy the backend as its own Vercel project with `backend/` as the Root
+Directory. Let Vercel detect the FastAPI application; do not configure a
+persistent Uvicorn start command or use `--reload` on Vercel.
+
+Set `DATABASE_URL` to the Supabase PostgreSQL connection string, `JWT_SECRET`
+to a private random secret, `APP_ENV=production`, and
+`API_CORS_ORIGINS` to the deployed frontend's HTTPS origin. Optionally set
+`GEMINI_API_KEY` to enable AI quote suggestions. Confirm the deployment with
+`/health/ready`.
+
 ## Preliminary quote suggestions
 
 The advisor's **Generate with AI** action requests a draft suggestion from the
