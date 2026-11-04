@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.config import APP_ENV, CORS_ORIGINS
+from app.config import APP_ENV
 from app.database import engine
 from app.routers import auth, bookings, clients, dashboard, quotes, requests
 
@@ -16,12 +16,13 @@ app = FastAPI(
     redoc_url=None if APP_ENV == "production" else "/redoc",
 )
 
+# Configuración permisiva de CORS para evitar errores con los dominios dinámicos de Vercel
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=["*"],  # Permite peticiones desde cualquier frontend (Vercel, localhost, etc.)
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["*"],
 )
 
 app.include_router(auth.router)
